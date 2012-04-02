@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Net.Sockets;
+﻿using System.Net.Sockets;
 using Cakewalk.Shared;
 using Cakewalk.Shared.Packets;
 
@@ -24,8 +20,6 @@ namespace Cakewalk.Server
         
         public ServerEntity(Socket socket, int worldID) : base(socket, worldID)
         {
-            //TODO: Change this back vvvvv
-            //Remember that this can be called multiple times per socket if there is a WorldID collision! (see TCP connect event). 
         }
 
         /// <summary>

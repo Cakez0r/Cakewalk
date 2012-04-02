@@ -1,17 +1,11 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using System.Net;
 using System.Collections.Concurrent;
+using System.Net;
 using System.Net.Sockets;
 using System.Threading;
 using Cakewalk.Server;
 using Cakewalk.Shared;
 using Cakewalk.Shared.Packets;
-using System.IO.Compression;
-using System.IO;
 
 namespace Cakewalk
 {
@@ -159,7 +153,7 @@ namespace Cakewalk
                 //Time for some expensive O(n) badness...
                 foreach (ServerEntity entity in m_entities.Values)
                 {
-                    //Cleanup any disconnects
+                    //Handle disconnect
                     if (!entity.IsConnected)
                     {
                         ServerEntity e = null;
@@ -168,6 +162,8 @@ namespace Cakewalk
                             Console.WriteLine("Entity disconnected: " + e.WorldID);
                             e.Dispose();
                         }
+
+                        continue;
                     }
 
                     //Push states of nearby entities to this entity
@@ -195,8 +191,8 @@ namespace Cakewalk
             //Only if he's authorised
             if (entity.AuthState == EntityAuthState.Authorised)
             {
-                //Catalogue nearby entities
-                Dictionary<int, EntityState> states = new Dictionary<int, EntityState>();
+                //Create a chunk of packets
+                dynamic packet = PacketFactory.CreatePacket<CoalescedData>();
 
                 //Sweep all entities in the world... ugh, optimise...!
                 foreach (ServerEntity e in m_entities.Values)
@@ -207,68 +203,24 @@ namespace Cakewalk
                         continue;
                     }
 
-                    //Add this entities state to the catalogue
-                    //TODO: Add a range check here. Just send everybody to everybody for now.
-                    states.Add(e.WorldID, e.LastState);
+                    //Add a push state into the coalesced data packet for this entity
+                    PushState state = PacketFactory.CreatePacket<PushState>();
+                    state.WorldID = e.WorldID;
+                    state.State = e.LastState;
+                    
+                    //If we ran out of room in this packet, fire it off and create a new one
+                    if (!packet.TryAddPacket(state))
+                    {
+                        entity.SendPacket(packet);
+                        packet = PacketFactory.CreatePacket<CoalescedData>();
+                        packet.TryAddPacket(state);
+                    }
                 }
 
-                //If we have anything to send...
-                if (states.Count > 0)
+                //If we have anything left to send...
+                if (packet.PacketCount > 0)
                 {
-                    //Some horrible copy-paste, but it is a massive performance gain on memory used and packets sent.
-                    //If this can be done in a better way, please fix!
-
-                    //Determine what size update packet we need
-                    dynamic packet = null;
-                    int maxStates = 0;
-                    while (states.Count > 0) //Loop while there are still states to send
-                    {
-                        if (states.Count <= 5)
-                        {
-                            packet = PacketFactory.CreatePacket<PushStates5>();     
-                            maxStates = 5;
-                        }
-                        else if (states.Count <= 10) 
-                        {
-                            packet = PacketFactory.CreatePacket<PushStates10>();    
-                            maxStates = 10;
-                        }
-                        else if (states.Count <= 25)
-                        {
-                            packet = PacketFactory.CreatePacket<PushStates25>();    
-                            maxStates = 25;
-                        }
-                        else if (states.Count <= 50)
-                        {
-                            packet = PacketFactory.CreatePacket<PushStates50>();
-                            maxStates = 50;
-                        }
-                        else
-                        {
-                            packet = PacketFactory.CreatePacket<PushStates100>(); 
-                            maxStates = 100;
-                        }
-
-                        foreach (KeyValuePair<int, EntityState> kvp in states)
-                        {
-                            //Fill the packet with states
-                            packet.AddState(kvp.Key, kvp.Value.X, kvp.Value.Y, kvp.Value.Rot, kvp.Value.Time, kvp.Value.Flags);
-                            if (packet.StateCount == maxStates)
-                            {
-                                //Stop when the packet is full
-                                break;
-                            }
-                        }
-
-                        //Remove any sent entities from the catalogue so that they're not resent
-                        for (int i = 0; i < packet.StateCount; i++)
-                        {
-                            states.Remove(packet.GetWorldID(i));
-                        }
-
-                        //Send the packet off
-                        entity.SendPacket(packet);
-                    }
+                    entity.SendPacket(packet);
                 }
             }
         }

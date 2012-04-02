@@ -1,8 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using Cakewalk.Shared.Packets;
 
 namespace Cakewalk.Shared.Packets
 {
@@ -15,12 +12,7 @@ namespace Cakewalk.Shared.Packets
         AuthRequest             = 1,
         AuthResponse            = 2,
         PushState               = 3,
-        PushStates5             = 4,
-        PushStates10            = 5,
-        PushStates25            = 6,
-        PushStates50            = 7,
-        PushStates100           = 8,
-        PushStates150           = 9,
+        CoalescedData           = 4
     }
 
     /// <summary>
@@ -33,11 +25,7 @@ namespace Cakewalk.Shared.Packets
             { PacketCode.AuthRequest,          typeof(AuthRequest) },
             { PacketCode.AuthResponse,         typeof(AuthResponse) },
             { PacketCode.PushState,            typeof(PushState) },
-            { PacketCode.PushStates5,          typeof(PushStates5) },
-            { PacketCode.PushStates10,         typeof(PushStates10) },
-            { PacketCode.PushStates25,         typeof(PushStates25) },
-            { PacketCode.PushStates50,         typeof(PushStates50) },
-            { PacketCode.PushStates100,        typeof(PushStates100) },
+            { PacketCode.CoalescedData,        typeof(CoalescedData) },
         };
 
         private static Dictionary<Type, PacketCode> s_codeMap = new Dictionary<Type, PacketCode>()
@@ -45,11 +33,7 @@ namespace Cakewalk.Shared.Packets
             { typeof(AuthRequest),              PacketCode.AuthRequest },
             { typeof(AuthResponse),             PacketCode.AuthResponse },
             { typeof(PushState),                PacketCode.PushState },
-            { typeof(PushStates5),              PacketCode.PushStates5 },
-            { typeof(PushStates10),             PacketCode.PushStates10 },
-            { typeof(PushStates25),             PacketCode.PushStates25 },
-            { typeof(PushStates50),             PacketCode.PushStates50 },
-            { typeof(PushStates100),            PacketCode.PushStates100 },
+            { typeof(CoalescedData),            PacketCode.CoalescedData },
         };
 
         /// <summary>

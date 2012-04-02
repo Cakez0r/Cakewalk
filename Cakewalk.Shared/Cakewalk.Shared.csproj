@@ -49,10 +49,10 @@
     <Compile Include="PacketFactory.cs" />
     <Compile Include="Packets\AuthRequest.cs" />
     <Compile Include="Packets\AuthResponse.cs" />
+    <Compile Include="Packets\CoalescedData.cs" />
     <Compile Include="Packets\IPacketBase.cs" />
     <Compile Include="Packets\PacketCodes.cs" />
     <Compile Include="Packets\PushState.cs" />
-    <Compile Include="Packets\PushStates.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

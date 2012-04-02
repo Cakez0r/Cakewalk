@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 
 namespace Cakewalk.Shared.Packets
 {
@@ -17,6 +13,11 @@ namespace Cakewalk.Shared.Packets
         {
             get { return (PacketCode)m_opCode; }
             set { m_opCode = (short)value; }
+        }
+
+        public int SizeInBytes
+        {
+            get { return Marshal.SizeOf(this); }
         }
 
         public int WorldID

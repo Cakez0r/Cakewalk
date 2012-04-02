@@ -1,13 +1,11 @@
 ﻿using System;
-using System.Net.Sockets;
 using System.Collections.Concurrent;
+using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Threading;
+using System.Threading.Tasks;
 using Cakewalk.Shared;
 using Cakewalk.Shared.Packets;
-using System.Runtime.InteropServices;
-using System.Threading.Tasks;
-using System.IO;
-using System.IO.Compression;
 
 namespace Cakewalk
 {
@@ -112,6 +110,11 @@ namespace Cakewalk
         Task m_receiveTask;
 
         /// <summary>
+        /// Cancellation token for net IO
+        /// </summary>
+        CancellationTokenSource m_ioStopToken;
+
+        /// <summary>
         /// Blank buffer
         /// </summary>
         private static readonly byte[] ZERO_BUFFER = new byte[BUFFER_SIZE];
@@ -149,6 +152,8 @@ namespace Cakewalk
             m_sendBufferHandle = GCHandle.Alloc(m_sendBuffer, GCHandleType.Pinned);
             m_receiveBufferHandle = GCHandle.Alloc(m_receiveBuffer, GCHandleType.Pinned);
 
+            m_ioStopToken = new CancellationTokenSource();
+
             //Kick off net IO tasks
             QueueSend();
             QueueReceive();
@@ -159,7 +164,7 @@ namespace Cakewalk
         /// </summary>
         private void QueueSend()
         {
-            m_sendTask = new Task(Send, TaskCreationOptions.LongRunning);
+            m_sendTask = new Task(Send, m_ioStopToken.Token, TaskCreationOptions.LongRunning);
             m_sendTask.ContinueWith((t) => t.Dispose());
             m_sendTask.Start();
         }
@@ -169,7 +174,7 @@ namespace Cakewalk
         /// </summary>
         private void QueueReceive()
         {
-            m_receiveTask = new Task(Receive, TaskCreationOptions.LongRunning);
+            m_receiveTask = new Task(Receive, m_ioStopToken.Token, TaskCreationOptions.LongRunning);
             m_receiveTask.ContinueWith((t) => t.Dispose());
             m_receiveTask.Start();
         }
@@ -188,11 +193,17 @@ namespace Cakewalk
                     Thread.Sleep(5);
                 }
 
+                //Bail out if we lost connection
+                if (!m_socket.Connected)
+                {
+                    return;
+                }
+
                 //Clear the send buffer
                 Buffer.BlockCopy(ZERO_BUFFER, 0, m_sendBuffer, 0, BUFFER_SIZE);
 
                 //Get size (in bytes) of the packet
-                int packetSize = Marshal.SizeOf(packet);
+                int packetSize = packet.SizeInBytes;
 
                 //Fill the send buffer with the packet bytes
                 SerializePacket(packet);
@@ -204,11 +215,6 @@ namespace Cakewalk
 
                     BOUT += packetSize;
                     OUT++;
-                }
-                catch (SocketException)
-                {
-                    //Socket disconnected
-                    //TODO: Put something better here...
                 }
                 catch (Exception ex)
                 {
@@ -272,25 +278,7 @@ namespace Cakewalk
                 short opCode = BitConverter.ToInt16(m_receiveBuffer, 0);
                 PacketCode packetCode = (PacketCode)opCode;
 
-                //Get the type for the packet sitting in the receive buffer
-                Type packetType = PacketMap.GetTypeForPacketCode(packetCode);
-
-                //If we can deserialize it...
-                if (packetType != null)
-                {
-                    try
-                    {
-                        //Block copy the buffer to a struct of the correct type
-                        IPacketBase packet = (IPacketBase)Marshal.PtrToStructure(m_receiveBufferHandle.AddrOfPinnedObject(), packetType);
-
-                        //Throw the strongly-typed packet into the incoming queue
-                        m_incomingQueue.Enqueue(packet);
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.Write("Deserialization error! " + ex);
-                    }
-                }
+                DeserializePacket(packetCode, m_receiveBufferHandle.AddrOfPinnedObject());
 
                 IN++;
             }
@@ -299,6 +287,36 @@ namespace Cakewalk
                 //We were sent junk. Disconnect...
                 m_socket.Disconnect(false);
             }
+        }
+
+        /// <summary>
+        /// Deserializes a packet from the given buffer. Returns the amount of bytes consumed.
+        /// </summary>
+        private int DeserializePacket(PacketCode packetCode, IntPtr buffer)
+        {
+            //Get the type for the packet sitting in the receive buffer
+            Type packetType = PacketMap.GetTypeForPacketCode(packetCode);
+
+            //If we can deserialize it...
+            if (packetType != null)
+            {
+                try
+                {
+                    //Block copy the buffer to a struct of the correct type
+                    IPacketBase packet = (IPacketBase)Marshal.PtrToStructure(buffer, packetType);
+
+                    //Throw the strongly-typed packet into the incoming queue
+                    m_incomingQueue.Enqueue(packet);
+
+                    return packet.SizeInBytes;
+                }
+                catch (Exception ex)
+                {
+                    Console.Write("Deserialization error! " + ex);
+                }
+            }
+
+            return 0;
         }
 
         /// <summary>
@@ -346,8 +364,13 @@ namespace Cakewalk
         /// </summary>
         public void Dispose()
         {
+            m_ioStopToken.Cancel();
+
             m_socket.Close();
             m_socket.Dispose();
+
+            m_sendBufferHandle.Free();
+            m_receiveBufferHandle.Free();
         }
 
         /// <summary>
@@ -364,11 +387,34 @@ namespace Cakewalk
                 SendPacket(response);
                 AuthState = EntityAuthState.Authorised;
             }
+
+            //Update auth state and world ID
             else if (packet is AuthResponse)
             {
                 AuthResponse response = (AuthResponse)packet;
                 WorldID = response.WorldID;
                 AuthState = EntityAuthState.Authorised;
+            }
+
+            //Unpack coalesced packets
+            else if (packet is CoalescedData)
+            {
+                CoalescedData data = (CoalescedData)packet;
+
+                unsafe
+                {
+                    byte* ptr = data.DataBuffer;
+                    //Start deserializing packets from the buffer
+                    for (int i = 0; i < data.PacketCount; i++)
+                    {
+                        //Pull the packet code from the buffer and cast it to enum
+                        short opCode = *(short*)ptr;
+                        PacketCode packetCode = (PacketCode)opCode;
+                        
+                        //Deserialize and advance pointer to next packet in the buffer
+                        ptr += DeserializePacket(packetCode, (IntPtr)ptr);
+                    }
+                }
             }
         }
 

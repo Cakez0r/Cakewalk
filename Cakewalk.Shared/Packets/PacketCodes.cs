@@ -12,7 +12,8 @@ namespace Cakewalk.Shared.Packets
         AuthRequest             = 1,
         AuthResponse            = 2,
         PushState               = 3,
-        CoalescedData           = 4
+        CoalescedData           = 4,
+        RequestZoneTransfer     = 5
     }
 
     /// <summary>
@@ -26,6 +27,7 @@ namespace Cakewalk.Shared.Packets
             { PacketCode.AuthResponse,         typeof(AuthResponse) },
             { PacketCode.PushState,            typeof(PushState) },
             { PacketCode.CoalescedData,        typeof(CoalescedData) },
+            { PacketCode.RequestZoneTransfer,  typeof(RequestZoneTransfer) },
         };
 
         private static Dictionary<Type, PacketCode> s_codeMap = new Dictionary<Type, PacketCode>()
@@ -34,6 +36,7 @@ namespace Cakewalk.Shared.Packets
             { typeof(AuthResponse),             PacketCode.AuthResponse },
             { typeof(PushState),                PacketCode.PushState },
             { typeof(CoalescedData),            PacketCode.CoalescedData },
+            { typeof(RequestZoneTransfer),      PacketCode.RequestZoneTransfer },
         };
 
         /// <summary>

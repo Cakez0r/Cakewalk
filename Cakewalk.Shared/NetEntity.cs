@@ -144,7 +144,6 @@ namespace Cakewalk
             m_socket = socket;
             socket.NoDelay = true; //No nagling
             socket.ReceiveBufferSize = BUFFER_SIZE;
-            socket.DontFragment = true; //No annoying bugs kthx
 
             AuthState = EntityAuthState.Unauthorised;
 
@@ -315,6 +314,11 @@ namespace Cakewalk
                     Console.Write("Deserialization error! " + ex);
                 }
             }
+            else
+            {
+                Console.WriteLine("Bad packet code: " + packetCode);
+                Console.WriteLine("Incoming queue count: " + m_incomingQueue.Count);
+            }
 
             return 0;
         }
@@ -334,7 +338,7 @@ namespace Cakewalk
         {
             try
             {
-                Marshal.StructureToPtr(packet, m_sendBufferHandle.AddrOfPinnedObject(), true);
+                Marshal.StructureToPtr(packet, m_sendBufferHandle.AddrOfPinnedObject(), false);
             }
             catch (Exception ex)
             {

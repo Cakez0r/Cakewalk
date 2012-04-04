@@ -6,6 +6,8 @@ using System.Threading;
 using Cakewalk.Server;
 using Cakewalk.Shared;
 using Cakewalk.Shared.Packets;
+using Cakewalk.Server.Zones;
+using System.Collections.Generic;
 
 namespace Cakewalk
 {
@@ -63,13 +65,21 @@ namespace Cakewalk
         private bool m_updateWorld;
 
         /// <summary>
+        /// Manages all zones in the world
+        /// </summary>
+        private ZoneManager m_zoneManager;
+
+        /// <summary>
         /// A whole neww worlddddddd!
         /// </summary>
         public World()
         {
             m_entities = new ConcurrentDictionary<int, ServerEntity>();
+
             m_tcp = new TCPDispatcher(IPAddress.Any, TCP_PORT);
             m_tcp.SocketConnected += TCP_SocketConnected;
+
+            m_zoneManager = new ZoneManager();
         }
 
         /// <summary>
@@ -86,21 +96,13 @@ namespace Cakewalk
                 //See if it's unique
                 if (!m_entities.ContainsKey(worldID))
                 {
-                    //Lock entities so nobody else adds this ID in parallel
-                    lock (m_entities)
+                    //Add them in
+                    ServerEntity entity = new ServerEntity(socket, worldID, m_zoneManager);
+                    if (m_entities.TryAdd(worldID, entity))
                     {
-                        //Check that nobody added the ID while we were locking
-                        if (!m_entities.ContainsKey(worldID))
-                        {
-                            //Add them in
-                            ServerEntity entity = new ServerEntity(socket, worldID);
-                            if (m_entities.TryAdd(worldID, entity))
-                            {
-                                //DONE!
-                                Console.WriteLine(worldID.ToString() + " joined");
-                                break;
-                            }
-                        }
+                        //DONE!
+                        Console.WriteLine(worldID.ToString() + " joined");
+                        break;
                     }
                 }
             }
@@ -166,8 +168,11 @@ namespace Cakewalk
                         continue;
                     }
 
-                    //Push states of nearby entities to this entity
-                    PushToNearbyEntities(entity);
+                    if (entity.AuthState == EntityAuthState.Authorised)
+                    {
+                        //Update nearby entities with each other
+                        m_zoneManager.PushNearbyEntities(entity);
+                    }
 
                     //Call update on this entity
                     entity.Update(dt);
@@ -180,48 +185,6 @@ namespace Cakewalk
                 int sleepTime = WORLD_UPDATE_TARGET_MS - (int)TimeSpan.FromTicks(Environment.TickCount - updateStartTime).TotalMilliseconds;
 
                 Thread.Sleep(Math.Max(1, sleepTime));
-            }
-        }
-
-        /// <summary>
-        /// Sends the state of nearby entities to the specified entity
-        /// </summary>
-        private void PushToNearbyEntities(ServerEntity entity)
-        {
-            //Only if he's authorised
-            if (entity.AuthState == EntityAuthState.Authorised)
-            {
-                //Create a chunk of packets
-                dynamic packet = PacketFactory.CreatePacket<CoalescedData>();
-
-                //Sweep all entities in the world... ugh, optimise...!
-                foreach (ServerEntity e in m_entities.Values)
-                {
-                    if (e.AuthState != EntityAuthState.Authorised || e.WorldID == entity.WorldID)
-                    {
-                        //Skip unauthorised entities and don't send to self
-                        continue;
-                    }
-
-                    //Add a push state into the coalesced data packet for this entity
-                    PushState state = PacketFactory.CreatePacket<PushState>();
-                    state.WorldID = e.WorldID;
-                    state.State = e.LastState;
-                    
-                    //If we ran out of room in this packet, fire it off and create a new one
-                    if (!packet.TryAddPacket(state))
-                    {
-                        entity.SendPacket(packet);
-                        packet = PacketFactory.CreatePacket<CoalescedData>();
-                        packet.TryAddPacket(state);
-                    }
-                }
-
-                //If we have anything left to send...
-                if (packet.PacketCount > 0)
-                {
-                    entity.SendPacket(packet);
-                }
             }
         }
     }

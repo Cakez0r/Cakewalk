@@ -50,6 +50,8 @@
     <Compile Include="ServerEntity.cs" />
     <Compile Include="TCPDispatcher.cs" />
     <Compile Include="World.cs" />
+    <Compile Include="Zones\Zone.cs" />
+    <Compile Include="Zones\ZoneManager.cs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Cakewalk.Shared\Cakewalk.Shared.csproj">

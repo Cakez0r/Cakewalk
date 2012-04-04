@@ -53,6 +53,7 @@
     <Compile Include="Packets\IPacketBase.cs" />
     <Compile Include="Packets\PacketCodes.cs" />
     <Compile Include="Packets\PushState.cs" />
+    <Compile Include="Packets\RequestZoneTransfer.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

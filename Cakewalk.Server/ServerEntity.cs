@@ -1,4 +1,5 @@
 ﻿using System.Net.Sockets;
+using Cakewalk.Server.Zones;
 using Cakewalk.Shared;
 using Cakewalk.Shared.Packets;
 
@@ -17,9 +18,15 @@ namespace Cakewalk.Server
             get;
             private set;
         }
+
+        /// <summary>
+        /// Reference to the world's zone manager
+        /// </summary>
+        private ZoneManager m_zoneManager;
         
-        public ServerEntity(Socket socket, int worldID) : base(socket, worldID)
+        public ServerEntity(Socket socket, int worldID, ZoneManager zoneManager) : base(socket, worldID)
         {
+            m_zoneManager = zoneManager;
         }
 
         /// <summary>
@@ -38,6 +45,14 @@ namespace Cakewalk.Server
                 {
                     LastState = state.State;
                 }
+            }
+
+            //Move the user in to a new zone
+            else if (packet is RequestZoneTransfer)
+            {
+                RequestZoneTransfer request = (RequestZoneTransfer)packet;
+
+                m_zoneManager.RequestZoneTransfer(this, request.ZoneID);
             }
         }
     }

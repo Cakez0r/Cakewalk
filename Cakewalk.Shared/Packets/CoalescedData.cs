@@ -9,11 +9,12 @@ namespace Cakewalk.Shared.Packets
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     public unsafe struct CoalescedData : IPacketBase
     {
+        //Should fit within standard MTU of 1500
         private const int BUFFER_SIZE = 1400;
 
         private short m_opCode;
         private byte m_packetCount;
-        private short m_sizeInBytes;
+        private short m_usedBytes;
 
         /// <summary>
         /// Buffer for all other packets
@@ -36,11 +37,11 @@ namespace Cakewalk.Shared.Packets
         }
 
         /// <summary>
-        /// Amount of bytes used of the buffer
+        /// Total size in bytes of this packet
         /// </summary>
         public int SizeInBytes
         {
-            get { return (int)m_sizeInBytes; }
+            get { return 5 + m_usedBytes; }
         }
 
         /// <summary>
@@ -52,11 +53,15 @@ namespace Cakewalk.Shared.Packets
             {
                 int packetSize = packet.SizeInBytes;
 
-                if (m_sizeInBytes + packetSize < BUFFER_SIZE)
+                if (m_usedBytes + packetSize < BUFFER_SIZE)
                 {
-                    Marshal.StructureToPtr(packet, (IntPtr)(buf + m_sizeInBytes), true);
-                    m_sizeInBytes += (short)packetSize;
+                    //Copy packet into buffer
+                    Marshal.StructureToPtr(packet, (IntPtr)(buf + m_usedBytes), false);
+
+                    //Update used bytes and packet count
+                    m_usedBytes += (short)packetSize;
                     m_packetCount++;
+
                     return true;
                 }
             }

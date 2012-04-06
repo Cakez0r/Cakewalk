@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Cakewalk.Shared;
 using Cakewalk.Shared.Packets;
+using System.Collections.Generic;
 
 namespace Cakewalk
 {
@@ -68,6 +69,16 @@ namespace Cakewalk
         /// The socket for net IO with this entity
         /// </summary>
         private Socket m_socket;
+
+        /// <summary>
+        /// List of packets that have accumulated to be sent at the next update
+        /// </summary>
+        private List<CoalescedData> m_deferredSendList = new List<CoalescedData>();
+
+        /// <summary>
+        /// The current working deferred packet
+        /// </summary>
+        private CoalescedData m_currentDeferredPacket = PacketFactory.CreatePacket<CoalescedData>();
 
         /// <summary>
         /// Incoming IO queue
@@ -271,7 +282,6 @@ namespace Cakewalk
                 catch (SocketException)
                 {
                     //Socket disconnected
-                    Console.WriteLine("Socket exception");
                 }
                 catch (Exception ex)
                 {
@@ -377,6 +387,19 @@ namespace Cakewalk
         }
 
         /// <summary>
+        /// Queues a packet to be send on the next update. Will coalesce these packets together.
+        /// </summary>
+        public void DeferredSendPacket(IPacketBase packet)
+        {
+            if (!m_currentDeferredPacket.TryAddPacket(packet))
+            {
+                m_deferredSendList.Add(m_currentDeferredPacket);
+                m_currentDeferredPacket = PacketFactory.CreatePacket<CoalescedData>();
+                m_currentDeferredPacket.TryAddPacket(packet);
+            }
+        }
+
+        /// <summary>
         /// Enqueue a packet for sending over the wire
         /// </summary>
         public void SendPacket(IPacketBase packet)
@@ -414,6 +437,20 @@ namespace Cakewalk
                 m_incomingQueue.TryDequeue(out packet);
                 HandlePacket(packet);
             }
+
+            //Send any packets that have been deferred
+            foreach (CoalescedData packet in m_deferredSendList)
+            {
+                SendPacket(packet);
+            }
+            m_deferredSendList.Clear();
+
+            if (m_currentDeferredPacket.PacketCount > 0)
+            {
+                SendPacket(m_currentDeferredPacket);
+            }
+
+            m_currentDeferredPacket = PacketFactory.CreatePacket<CoalescedData>();
         }
 
         /// <summary>
@@ -441,7 +478,7 @@ namespace Cakewalk
                 AuthResponse response = PacketFactory.CreatePacket<AuthResponse>();
                 //Tell them their world ID
                 response.WorldID = WorldID;
-                SendPacket(response);
+                DeferredSendPacket(response);
                 AuthState = EntityAuthState.Authorised;
             }
 
@@ -480,7 +517,7 @@ namespace Cakewalk
             if (AuthState == EntityAuthState.Unauthorised)
             {
                 AuthState = EntityAuthState.Authorising;
-                SendPacket(PacketFactory.CreatePacket<AuthRequest>());
+                DeferredSendPacket(PacketFactory.CreatePacket<AuthRequest>());
             }
         }
     }

@@ -74,7 +74,7 @@ namespace Cakewalk.Server
                 response.WorldID = request.WorldID;
                 string name = m_world.GetNameForWorldID(request.WorldID);
                 TextHelpers.StringToBuffer(name, response.Name, name.Length);
-                SendPacket(response);
+                DeferredSendPacket(response);
             }
         }
     }

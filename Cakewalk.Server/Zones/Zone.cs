@@ -56,9 +56,6 @@ namespace Cakewalk.Server.Zones
         /// </summary>
         public void PushNearbyEntities(ServerEntity entity)
         {
-            //Create a chunk of packets
-            CoalescedData packet = PacketFactory.CreatePacket<CoalescedData>();
-
             foreach (ServerEntity e in m_entities.Values)
             {
                 if (e.AuthState != EntityAuthState.Authorised || e.WorldID == entity.WorldID)
@@ -72,19 +69,7 @@ namespace Cakewalk.Server.Zones
                 state.WorldID = e.WorldID;
                 state.State = e.LastState;
 
-                //If we ran out of room in this packet, fire it off and create a new one
-                if (!packet.TryAddPacket(state))
-                {
-                    entity.SendPacket(packet);
-                    packet = PacketFactory.CreatePacket<CoalescedData>();
-                    packet.TryAddPacket(state);
-                }
-            }
-
-            //If we have anything left to send...
-            if (packet.PacketCount > 0)
-            {
-                entity.SendPacket(packet);
+                entity.DeferredSendPacket(state);
             }
         }
     }

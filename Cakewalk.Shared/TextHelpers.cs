@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Runtime.InteropServices;
 
-namespace Cakewalk.Server
+namespace Cakewalk.Shared
 {
     public unsafe static class TextHelpers
     {

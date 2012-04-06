@@ -118,12 +118,12 @@ namespace Cakewalk
         /// <summary>
         /// GC handle for pinning the receive buffer
         /// </summary>
-        GCHandle m_receiveBufferHandle;
+        private GCHandle m_receiveBufferHandle;
 
         /// <summary>
         /// GC handle for pinning the send buffer
         /// </summary>
-        GCHandle m_sendBufferHandle;
+        private GCHandle m_sendBufferHandle;
 
         /// <summary>
         /// GC handle for pinning the working buffer
@@ -131,19 +131,24 @@ namespace Cakewalk
         private GCHandle m_workingPacketBufferHandle;
 
         /// <summary>
+        /// Context object for async receives
+        /// </summary>
+        private SocketAsyncEventArgs m_receiveAsyncArgs;
+
+        /// <summary>
         /// Task for running network sends
         /// </summary>
-        Task m_sendTask;
+        private Task m_sendTask;
 
         /// <summary>
         /// Task for running network receives.
         /// </summary>
-        Task m_receiveTask;
+        private Task m_receiveTask;
 
         /// <summary>
         /// Cancellation token for net IO
         /// </summary>
-        CancellationTokenSource m_ioStopToken;
+        private CancellationTokenSource m_ioStopToken;
 
         #region TEMPORARY COUNTERS! Clean this!
         public static int IN = 0;
@@ -201,11 +206,15 @@ namespace Cakewalk
         /// </summary>
         private void QueueReceive()
         {
+            m_receiveAsyncArgs = new SocketAsyncEventArgs();
+            m_receiveAsyncArgs.SetBuffer(m_receiveBuffer, 0, BUFFER_SIZE);
+            m_receiveAsyncArgs.Completed += new EventHandler<SocketAsyncEventArgs>(ReceiveCompleted);
+
             m_receiveTask = new Task(Receive, m_ioStopToken.Token, TaskCreationOptions.LongRunning);
             m_receiveTask.ContinueWith((t) => t.Dispose());
             m_receiveTask.Start();
         }
-
+        
         /// <summary>
         /// Poll the outgoing queue and send any packets
         /// </summary>
@@ -214,6 +223,7 @@ namespace Cakewalk
             while (true)
             {
                 IPacketBase packet = null;
+
                 while (!m_outgoingQueue.TryDequeue(out packet))
                 {
                     //Spin until we get something to send
@@ -237,8 +247,6 @@ namespace Cakewalk
                     //Send packet bytes over the wire
                     m_socket.Send(m_sendBuffer, packetSize, SocketFlags.None);
 
-                    //Console.WriteLine("Sent " + packet.OpCode);
-
                     BOUT += packetSize;
                     OUT++;
                 }
@@ -253,43 +261,47 @@ namespace Cakewalk
         }
 
         /// <summary>
-        /// Receive and dispatch packets from the socket
+        /// Starts an async receive from the socket
         /// </summary>
         private void Receive()
         {
-            //Receive loop
-            while (true)
+            try
             {
-                try
+                if (m_socket.Connected)
                 {
-                    if (m_socket.Connected)
+                    //Receive data from the wire
+                    if (!m_socket.ReceiveAsync(m_receiveAsyncArgs))
                     {
-                        //Receive data from the wire
-                        int bytesReceived = m_socket.Receive(m_receiveBuffer);
-
-                        BIN += bytesReceived;
-
-                        //Pass it off to the handler
-                        HandleReceive(bytesReceived);
+                        ReceiveCompleted(m_socket, m_receiveAsyncArgs);
                     }
-                    else
-                    {
-                        m_socket.Dispose();
-                        return;
-                    }
-
                 }
-                catch (SocketException)
+                else
                 {
-                    //Socket disconnected
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine("Receive error! " + ex);
+                    m_socket.Dispose();
+                    return;
                 }
 
-                //Yield
-                Thread.Sleep(0);
+            }
+            catch (SocketException)
+            {
+                //Socket disconnected
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Receive error! " + ex);
+            }
+        }
+
+        /// <summary>
+        /// Event handler for an async receive completion
+        /// </summary>
+        private void ReceiveCompleted(object sender, SocketAsyncEventArgs e)
+        {
+            if (e.SocketError == SocketError.Success)
+            {
+                BIN += e.BytesTransferred;
+                HandleReceive(e.BytesTransferred);
+                Receive();
             }
         }
 

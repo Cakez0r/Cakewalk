@@ -64,12 +64,20 @@ namespace Cakewalk.Server.Zones
                     continue;
                 }
 
-                //Add a push state into the coalesced data packet for this entity
-                PushState state = PacketFactory.CreatePacket<PushState>();
-                state.WorldID = e.WorldID;
-                state.State = e.LastState;
+                float xDiff = entity.LastState.X - e.LastState.X;
+                float yDiff = entity.LastState.Y - e.LastState.Y;
 
-                entity.DeferredSendPacket(state);
+                float sqrdistance = (xDiff * xDiff) + (yDiff * yDiff);
+
+                if (sqrdistance < 768*768)
+                {
+                    //Add a push state into the coalesced data packet for this entity
+                    PushState state = PacketFactory.CreatePacket<PushState>();
+                    state.WorldID = e.WorldID;
+                    state.State = e.LastState;
+
+                    entity.DeferredSendPacket(state);
+                }
             }
         }
     }

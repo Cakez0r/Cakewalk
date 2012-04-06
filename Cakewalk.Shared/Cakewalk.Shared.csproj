@@ -49,6 +49,7 @@
     <Compile Include="PacketFactory.cs" />
     <Compile Include="Packets\AuthRequest.cs" />
     <Compile Include="Packets\AuthResponse.cs" />
+    <Compile Include="Packets\ChatMessage.cs" />
     <Compile Include="Packets\CoalescedData.cs" />
     <Compile Include="Packets\IPacketBase.cs" />
     <Compile Include="Packets\PacketCodes.cs" />

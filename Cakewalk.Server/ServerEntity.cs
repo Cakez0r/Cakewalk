@@ -36,7 +36,7 @@ namespace Cakewalk.Server
         
         public ServerEntity(Socket socket, int worldID, World world) : base(socket, worldID)
         {
-            Name = Guid.NewGuid().ToString().Replace("-", "").Substring(0, new Random(Environment.TickCount).Next(3, 16));
+            Name = worldID.ToString();
             m_world = world;
         }
 

@@ -72,12 +72,12 @@ namespace Cakewalk
         /// <summary>
         /// Incoming IO queue
         /// </summary>
-        public ConcurrentQueue<IPacketBase> m_incomingQueue = new ConcurrentQueue<IPacketBase>();
+        private ConcurrentQueue<IPacketBase> m_incomingQueue = new ConcurrentQueue<IPacketBase>();
 
         /// <summary>
         /// Outgoing IO queue
         /// </summary>
-        public ConcurrentQueue<IPacketBase> m_outgoingQueue = new ConcurrentQueue<IPacketBase>();
+        private ConcurrentQueue<IPacketBase> m_outgoingQueue = new ConcurrentQueue<IPacketBase>();
 
         /// <summary>
         /// Receive buffer for the socket

@@ -46,6 +46,19 @@ namespace Cakewalk.Server.Zones
         }
 
         /// <summary>
+        /// Remove an entity from the zone that they are in
+        /// </summary>
+        public void RemoveEntity(ServerEntity entity)
+        {
+            Zone zone = null;
+            m_userZones.TryGetValue(entity, out zone);
+            if (zone != null)
+            {
+                zone.RemoveEntity(entity);
+            }
+        }
+
+        /// <summary>
         /// Tries to move a user in to a new zone.
         /// </summary>
         public bool RequestZoneTransfer(ServerEntity entity, int newZoneID)

@@ -12,7 +12,7 @@ namespace Cakewalk.Shared.Packets
         //Should fit within standard MTU of 1500
         private const int BUFFER_SIZE = 1400;
 
-        private short m_opCode;
+        private PacketHeader m_header;
         private byte m_packetCount;
         private short m_usedBytes;
 
@@ -21,10 +21,9 @@ namespace Cakewalk.Shared.Packets
         /// </summary>
         public fixed byte DataBuffer[BUFFER_SIZE];
 
-        public PacketCode OpCode
+        public PacketHeader Header
         {
-            get { return (PacketCode)m_opCode; }
-            set { m_opCode = (short)value; }
+            get { return m_header; }
         }
 
         /// <summary>
@@ -37,21 +36,13 @@ namespace Cakewalk.Shared.Packets
         }
 
         /// <summary>
-        /// Total size in bytes of this packet
-        /// </summary>
-        public int SizeInBytes
-        {
-            get { return 5 + m_usedBytes; }
-        }
-
-        /// <summary>
         /// Try to add a packet into the buffer. Returns true if the packet was successfully copied.
         /// </summary>
         public bool TryAddPacket(IPacketBase packet)
         {
             fixed (byte* buf = DataBuffer)
             {
-                int packetSize = packet.SizeInBytes;
+                int packetSize = packet.Header.SizeInBytes;
 
                 if (m_usedBytes + packetSize < BUFFER_SIZE)
                 {
@@ -62,11 +53,23 @@ namespace Cakewalk.Shared.Packets
                     m_usedBytes += (short)packetSize;
                     m_packetCount++;
 
+                    //Update actual size
+                    m_header.SizeInBytes = (short)(Marshal.SizeOf(this) - BUFFER_SIZE + m_usedBytes);
+
                     return true;
                 }
             }
 
             return false;
+        }
+
+        public void SetupHeader()
+        {
+            m_header = new PacketHeader()
+            {
+                OpCode = PacketCode.CoalescedData,
+                SizeInBytes = (short)(Marshal.SizeOf(this) - BUFFER_SIZE)
+            };
         }
     }
 }

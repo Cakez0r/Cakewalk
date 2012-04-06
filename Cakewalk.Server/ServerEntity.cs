@@ -2,6 +2,7 @@
 using Cakewalk.Server.Zones;
 using Cakewalk.Shared;
 using Cakewalk.Shared.Packets;
+using System;
 
 namespace Cakewalk.Server
 {
@@ -20,19 +21,29 @@ namespace Cakewalk.Server
         }
 
         /// <summary>
-        /// Reference to the world's zone manager
+        /// The display name of this entity
         /// </summary>
-        private ZoneManager m_zoneManager;
-        
-        public ServerEntity(Socket socket, int worldID, ZoneManager zoneManager) : base(socket, worldID)
+        public string Name
         {
-            m_zoneManager = zoneManager;
+            get;
+            private set;
+        }
+
+        /// <summary>
+        /// Reference to the world
+        /// </summary>
+        private World m_world;
+        
+        public ServerEntity(Socket socket, int worldID, World world) : base(socket, worldID)
+        {
+            Name = Guid.NewGuid().ToString().Replace("-", "").Substring(0, new Random(Environment.TickCount).Next(3, 16));
+            m_world = world;
         }
 
         /// <summary>
         /// Incoming packets are pushed here for handling.
         /// </summary>
-        protected override void HandlePacket(IPacketBase packet)
+        protected unsafe override void HandlePacket(IPacketBase packet)
         {
             base.HandlePacket(packet);
 
@@ -52,7 +63,18 @@ namespace Cakewalk.Server
             {
                 RequestZoneTransfer request = (RequestZoneTransfer)packet;
 
-                m_zoneManager.RequestZoneTransfer(this, request.ZoneID);
+                m_world.ZoneManager.RequestZoneTransfer(this, request.ZoneID);
+            }
+
+            //Resolve names
+            else if (packet is WhoisRequest)
+            {
+                WhoisRequest request = (WhoisRequest)packet;
+                WhoisResponse response = PacketFactory.CreatePacket<WhoisResponse>();
+                response.WorldID = request.WorldID;
+                string name = m_world.GetNameForWorldID(request.WorldID);
+                TextHelpers.StringToBuffer(name, response.Name, name.Length);
+                SendPacket(response);
             }
         }
     }

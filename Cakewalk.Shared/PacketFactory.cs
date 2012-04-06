@@ -17,7 +17,7 @@ namespace Cakewalk.Shared
         public static T CreatePacket<T>() where T : IPacketBase, new()
         {
             T packet = new T();
-            packet.OpCode = PacketMap.GetPacketCodeForType(typeof(T));
+            packet.SetupHeader();
 
             return packet;
         }

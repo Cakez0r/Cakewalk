@@ -5,17 +5,20 @@ namespace Cakewalk.Shared.Packets
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     public struct AuthRequest : IPacketBase
     {
-        private short m_opCode;
+        private PacketHeader m_header;
 
-        public PacketCode OpCode
+        public PacketHeader Header
         {
-            get { return (PacketCode)m_opCode; }
-            set { m_opCode = (short)value; }
+            get { return m_header; }
         }
 
-        public int SizeInBytes
+        public void SetupHeader()
         {
-            get { return Marshal.SizeOf(this); }
+            m_header = new PacketHeader()
+            {
+                OpCode = PacketCode.AuthRequest,
+                SizeInBytes = (short)Marshal.SizeOf(this)
+            };
         }
     }
 }

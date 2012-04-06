@@ -19,7 +19,7 @@ namespace Cakewalk
         /// <summary>
         /// How fast the world will try to update
         /// </summary>
-        private const int WORLD_UPDATE_TARGET_MS = 100;
+        private const int WORLD_UPDATE_TARGET_MS = 50;
 
         /// <summary>
         /// The amount of currently connected users
@@ -67,7 +67,11 @@ namespace Cakewalk
         /// <summary>
         /// Manages all zones in the world
         /// </summary>
-        private ZoneManager m_zoneManager;
+        public ZoneManager ZoneManager
+        {
+            get;
+            private set;
+        }
 
         /// <summary>
         /// A whole neww worlddddddd!
@@ -79,7 +83,7 @@ namespace Cakewalk
             m_tcp = new TCPDispatcher(IPAddress.Any, TCP_PORT);
             m_tcp.SocketConnected += TCP_SocketConnected;
 
-            m_zoneManager = new ZoneManager();
+            ZoneManager = new ZoneManager();
         }
 
         /// <summary>
@@ -97,7 +101,7 @@ namespace Cakewalk
                 if (!m_entities.ContainsKey(worldID))
                 {
                     //Add them in
-                    ServerEntity entity = new ServerEntity(socket, worldID, m_zoneManager);
+                    ServerEntity entity = new ServerEntity(socket, worldID, this);
                     if (m_entities.TryAdd(worldID, entity))
                     {
                         //DONE!
@@ -162,6 +166,7 @@ namespace Cakewalk
                         if (m_entities.TryRemove(entity.WorldID, out e))
                         {
                             Console.WriteLine("Entity disconnected: " + e.WorldID);
+                            ZoneManager.RemoveEntity(e);
                             e.Dispose();
                         }
 
@@ -171,7 +176,7 @@ namespace Cakewalk
                     if (entity.AuthState == EntityAuthState.Authorised)
                     {
                         //Update nearby entities with each other
-                        m_zoneManager.PushNearbyEntities(entity);
+                        ZoneManager.PushNearbyEntities(entity);
                     }
 
                     //Call update on this entity
@@ -184,8 +189,30 @@ namespace Cakewalk
                 //Calculate how long to sleep for, based on how long the world update took
                 int sleepTime = WORLD_UPDATE_TARGET_MS - (int)TimeSpan.FromTicks(Environment.TickCount - updateStartTime).TotalMilliseconds;
 
+                if (sleepTime < 0)
+                {
+                    Console.WriteLine("World update in overtime: " + Math.Abs(sleepTime));
+                }
+
                 Thread.Sleep(Math.Max(1, sleepTime));
             }
+        }
+
+        /// <summary>
+        /// Resolve a world ID to a name
+        /// </summary>
+        /// <returns></returns>
+        public string GetNameForWorldID(int worldID)
+        {
+            string name = string.Empty;
+
+            ServerEntity entity = null;
+            if (m_entities.TryGetValue(worldID, out entity))
+            {
+                name = entity.Name;
+            }
+
+            return name;
         }
     }
 }

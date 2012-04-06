@@ -13,7 +13,9 @@ namespace Cakewalk.Shared.Packets
         AuthResponse            = 2,
         PushState               = 3,
         CoalescedData           = 4,
-        RequestZoneTransfer     = 5
+        RequestZoneTransfer     = 5,
+        WhoisRequest            = 6,
+        WhoisResponse           = 7
     }
 
     /// <summary>
@@ -28,15 +30,8 @@ namespace Cakewalk.Shared.Packets
             { PacketCode.PushState,            typeof(PushState) },
             { PacketCode.CoalescedData,        typeof(CoalescedData) },
             { PacketCode.RequestZoneTransfer,  typeof(RequestZoneTransfer) },
-        };
-
-        private static Dictionary<Type, PacketCode> s_codeMap = new Dictionary<Type, PacketCode>()
-        {
-            { typeof(AuthRequest),              PacketCode.AuthRequest },
-            { typeof(AuthResponse),             PacketCode.AuthResponse },
-            { typeof(PushState),                PacketCode.PushState },
-            { typeof(CoalescedData),            PacketCode.CoalescedData },
-            { typeof(RequestZoneTransfer),      PacketCode.RequestZoneTransfer },
+            { PacketCode.WhoisRequest,         typeof(WhoisRequest) },
+            { PacketCode.WhoisResponse,        typeof(WhoisResponse) },
         };
 
         /// <summary>
@@ -49,18 +44,6 @@ namespace Cakewalk.Shared.Packets
             s_typeMap.TryGetValue(c, out t);
 
             return t;
-        }
-
-        /// <summary>
-        /// Get the packed code for a given type
-        /// </summary>
-        public static PacketCode GetPacketCodeForType(Type t)
-        {
-            PacketCode code = PacketCode.BadType;
-
-            s_codeMap.TryGetValue(t, out code);
-
-            return code;
         }
     }
 }

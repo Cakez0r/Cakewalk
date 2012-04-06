@@ -24,7 +24,7 @@ namespace Cakewalk
         /// <summary>
         /// Send and receive buffer size
         /// </summary>
-        private const int BUFFER_SIZE = 2048;
+        private const int BUFFER_SIZE = 1460;
 
         /// <summary>
         /// This entity's current authorisation state
@@ -72,22 +72,37 @@ namespace Cakewalk
         /// <summary>
         /// Incoming IO queue
         /// </summary>
-        ConcurrentQueue<IPacketBase> m_incomingQueue = new ConcurrentQueue<IPacketBase>();
+        public ConcurrentQueue<IPacketBase> m_incomingQueue = new ConcurrentQueue<IPacketBase>();
 
         /// <summary>
         /// Outgoing IO queue
         /// </summary>
-        ConcurrentQueue<IPacketBase> m_outgoingQueue = new ConcurrentQueue<IPacketBase>();
+        public ConcurrentQueue<IPacketBase> m_outgoingQueue = new ConcurrentQueue<IPacketBase>();
 
         /// <summary>
         /// Receive buffer for the socket
         /// </summary>
-        byte[] m_receiveBuffer = new byte[BUFFER_SIZE];
+        private byte[] m_receiveBuffer = new byte[BUFFER_SIZE];
 
         /// <summary>
         /// Receive buffer for the socket
         /// </summary>
-        byte[] m_sendBuffer = new byte[BUFFER_SIZE];
+        private byte[] m_sendBuffer = new byte[BUFFER_SIZE];
+
+        /// <summary>
+        /// Working buffer for constructing packets from the tcp stream
+        /// </summary>
+        private byte[] m_workingPacketBuffer = new byte[BUFFER_SIZE];
+
+        /// <summary>
+        /// The expected size of the working packet
+        /// </summary>
+        private int m_workingPacketSize = 0;
+
+        /// <summary>
+        /// The amount of bytes received for the current working packet
+        /// </summary>
+        private int m_workingPacketReceivedBytes = 0;
 
         /// <summary>
         /// GC handle for pinning the receive buffer
@@ -98,6 +113,11 @@ namespace Cakewalk
         /// GC handle for pinning the send buffer
         /// </summary>
         GCHandle m_sendBufferHandle;
+
+        /// <summary>
+        /// GC handle for pinning the working buffer
+        /// </summary>
+        private GCHandle m_workingPacketBufferHandle;
 
         /// <summary>
         /// Task for running network sends
@@ -113,11 +133,6 @@ namespace Cakewalk
         /// Cancellation token for net IO
         /// </summary>
         CancellationTokenSource m_ioStopToken;
-
-        /// <summary>
-        /// Blank buffer
-        /// </summary>
-        private static readonly byte[] ZERO_BUFFER = new byte[BUFFER_SIZE];
 
         #region TEMPORARY COUNTERS! Clean this!
         public static int IN = 0;
@@ -144,12 +159,14 @@ namespace Cakewalk
             m_socket = socket;
             socket.NoDelay = true; //No nagling
             socket.ReceiveBufferSize = BUFFER_SIZE;
+            socket.SendBufferSize = BUFFER_SIZE;
 
             AuthState = EntityAuthState.Unauthorised;
 
             //Pin buffers so that we can block copy structs to / from them
             m_sendBufferHandle = GCHandle.Alloc(m_sendBuffer, GCHandleType.Pinned);
             m_receiveBufferHandle = GCHandle.Alloc(m_receiveBuffer, GCHandleType.Pinned);
+            m_workingPacketBufferHandle = GCHandle.Alloc(m_workingPacketBuffer, GCHandleType.Pinned);
 
             m_ioStopToken = new CancellationTokenSource();
 
@@ -198,11 +215,8 @@ namespace Cakewalk
                     return;
                 }
 
-                //Clear the send buffer
-                Buffer.BlockCopy(ZERO_BUFFER, 0, m_sendBuffer, 0, BUFFER_SIZE);
-
                 //Get size (in bytes) of the packet
-                int packetSize = packet.SizeInBytes;
+                int packetSize = packet.Header.SizeInBytes;
 
                 //Fill the send buffer with the packet bytes
                 SerializePacket(packet);
@@ -211,6 +225,8 @@ namespace Cakewalk
                 {
                     //Send packet bytes over the wire
                     m_socket.Send(m_sendBuffer, packetSize, SocketFlags.None);
+
+                    //Console.WriteLine("Sent " + packet.OpCode);
 
                     BOUT += packetSize;
                     OUT++;
@@ -255,6 +271,7 @@ namespace Cakewalk
                 catch (SocketException)
                 {
                     //Socket disconnected
+                    Console.WriteLine("Socket exception");
                 }
                 catch (Exception ex)
                 {
@@ -273,13 +290,48 @@ namespace Cakewalk
         {
             if (bytesReceived > 1)
             {
-                //Pull the packet code from the buffer and cast it to enum
-                short opCode = BitConverter.ToInt16(m_receiveBuffer, 0);
-                PacketCode packetCode = (PacketCode)opCode;
+                int bytesConsumed = 0;
+                //While there are bytes to be consumed in the receive buffer...
+                while (bytesConsumed < bytesReceived)
+                {
+                    //Work out how many bytes (if any) we need to complete the packet in the working buffer
+                    int bytesNeededForPacketCompletion = m_workingPacketSize - m_workingPacketReceivedBytes;
 
-                DeserializePacket(packetCode, m_receiveBufferHandle.AddrOfPinnedObject());
+                    //If we're awaiting a new packet...
+                    if (bytesNeededForPacketCompletion == 0)
+                    {
+                        //Get the size we're expecting from the receive buffer
+                        m_workingPacketSize = BitConverter.ToInt16(m_receiveBuffer, bytesConsumed);
 
-                IN++;
+                        //Update the number of bytes we need to construct the whole packet
+                        bytesNeededForPacketCompletion = m_workingPacketSize;
+                    }
+
+                    //Copy as much of the current working packet from the receive buffer as possible
+                    int bytesToCopy = Math.Min(bytesNeededForPacketCompletion, bytesReceived - bytesConsumed);
+                    Buffer.BlockCopy(m_receiveBuffer, bytesConsumed, m_workingPacketBuffer, m_workingPacketReceivedBytes, bytesToCopy);
+
+                    //If we have enough data to complete the packet, we should deserialize it from the working buffer
+                    if (bytesReceived - bytesConsumed >= bytesNeededForPacketCompletion)
+                    {
+                        //Deserialize from the working buffer
+                        DeserializePacket(m_workingPacketBufferHandle.AddrOfPinnedObject());
+
+                        //Expect a new packet from the stream
+                        m_workingPacketReceivedBytes = 0;
+                        m_workingPacketSize = 0;
+
+                        IN++;
+                    }
+                    else
+                    {
+                        //If we didn't receive enough bytes to complete the packet, update the counters so that we can continue constructing it next receive
+                        m_workingPacketReceivedBytes += bytesToCopy;
+                    }
+
+                    //Count how many bytes we've used from the buffer (there may be multiple packets per receive)
+                    bytesConsumed += bytesToCopy;
+                }
             }
             else
             {
@@ -291,10 +343,12 @@ namespace Cakewalk
         /// <summary>
         /// Deserializes a packet from the given buffer. Returns the amount of bytes consumed.
         /// </summary>
-        private int DeserializePacket(PacketCode packetCode, IntPtr buffer)
+        private int DeserializePacket(IntPtr buffer)
         {
+            PacketHeader packetHeader = (PacketHeader)Marshal.PtrToStructure(buffer, typeof(PacketHeader));
+
             //Get the type for the packet sitting in the receive buffer
-            Type packetType = PacketMap.GetTypeForPacketCode(packetCode);
+            Type packetType = PacketMap.GetTypeForPacketCode(packetHeader.OpCode);
 
             //If we can deserialize it...
             if (packetType != null)
@@ -307,7 +361,7 @@ namespace Cakewalk
                     //Throw the strongly-typed packet into the incoming queue
                     m_incomingQueue.Enqueue(packet);
 
-                    return packet.SizeInBytes;
+                    return packet.Header.SizeInBytes;
                 }
                 catch (Exception ex)
                 {
@@ -316,8 +370,7 @@ namespace Cakewalk
             }
             else
             {
-                Console.WriteLine("Bad packet code: " + packetCode);
-                Console.WriteLine("Incoming queue count: " + m_incomingQueue.Count);
+                Console.WriteLine("Bad packet code: " + packetHeader.OpCode);
             }
 
             return 0;
@@ -356,7 +409,7 @@ namespace Cakewalk
 
             for (int i = 0; i < dequeueCount; i++)
             {
-                //Try handling all packets that were in the queue at the start of this update
+                //Try handling all packets that were in the queue at the start of this upda
                 IPacketBase packet = null;
                 m_incomingQueue.TryDequeue(out packet);
                 HandlePacket(packet);
@@ -366,7 +419,7 @@ namespace Cakewalk
         /// <summary>
         /// Clean up this entity
         /// </summary>
-        public void Dispose()
+        public virtual void Dispose()
         {
             m_ioStopToken.Cancel();
 
@@ -411,12 +464,8 @@ namespace Cakewalk
                     //Start deserializing packets from the buffer
                     for (int i = 0; i < data.PacketCount; i++)
                     {
-                        //Pull the packet code from the buffer and cast it to enum
-                        short opCode = *(short*)ptr;
-                        PacketCode packetCode = (PacketCode)opCode;
-                        
                         //Deserialize and advance pointer to next packet in the buffer
-                        ptr += DeserializePacket(packetCode, (IntPtr)ptr);
+                        ptr += DeserializePacket((IntPtr)ptr);
                     }
                 }
             }

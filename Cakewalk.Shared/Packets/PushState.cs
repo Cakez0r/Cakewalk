@@ -5,19 +5,13 @@ namespace Cakewalk.Shared.Packets
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     public struct PushState : IPacketBase
     {
-        private short m_opCode;
+        private PacketHeader m_header;
         private int m_worldID;
         private EntityState m_state;
 
-        public PacketCode OpCode
+        public PacketHeader Header
         {
-            get { return (PacketCode)m_opCode; }
-            set { m_opCode = (short)value; }
-        }
-
-        public int SizeInBytes
-        {
-            get { return Marshal.SizeOf(this); }
+            get { return m_header; }
         }
 
         public int WorldID
@@ -30,6 +24,15 @@ namespace Cakewalk.Shared.Packets
         {
             get { return m_state; }
             set { m_state = value; }
+        }
+
+        public void SetupHeader()
+        {
+            m_header = new PacketHeader()
+            {
+                OpCode = PacketCode.PushState,
+                SizeInBytes = (short)Marshal.SizeOf(this)
+            };
         }
     }
 }

@@ -5,7 +5,8 @@
     /// </summary>
     public interface IPacketBase
     {
-        int SizeInBytes { get; }
-        PacketCode OpCode { get; set; }
+        PacketHeader Header { get; }
+
+        void SetupHeader();
     }
 }

@@ -50,12 +50,14 @@
     <Compile Include="Packets\AuthRequest.cs" />
     <Compile Include="Packets\AuthResponse.cs" />
     <Compile Include="Packets\ChatMessage.cs" />
+    <Compile Include="Packets\ClockSyncResponse.cs" />
     <Compile Include="Packets\CoalescedData.cs" />
     <Compile Include="Packets\IPacketBase.cs" />
     <Compile Include="Packets\PacketCodes.cs" />
     <Compile Include="Packets\PacketHeader.cs" />
     <Compile Include="Packets\PushState.cs" />
     <Compile Include="Packets\RequestZoneTransfer.cs" />
+    <Compile Include="Packets\ClockSyncRequest.cs" />
     <Compile Include="Packets\WhoisRequest.cs" />
     <Compile Include="Packets\WhoisResponse.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />

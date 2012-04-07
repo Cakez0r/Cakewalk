@@ -15,7 +15,10 @@ namespace Cakewalk.Shared.Packets
         CoalescedData           = 4,
         RequestZoneTransfer     = 5,
         WhoisRequest            = 6,
-        WhoisResponse           = 7
+        WhoisResponse           = 7,
+        ChatMessage             = 8,
+        ClockSyncRequest        = 9,
+        ClockSyncResponse       = 10,
     }
 
     /// <summary>
@@ -32,6 +35,9 @@ namespace Cakewalk.Shared.Packets
             { PacketCode.RequestZoneTransfer,  typeof(RequestZoneTransfer) },
             { PacketCode.WhoisRequest,         typeof(WhoisRequest) },
             { PacketCode.WhoisResponse,        typeof(WhoisResponse) },
+            { PacketCode.ChatMessage,          typeof(ChatMessage) },
+            { PacketCode.ClockSyncRequest,     typeof(ClockSyncRequest) },
+            { PacketCode.ClockSyncResponse,    typeof(ClockSyncResponse) },
         };
 
         /// <summary>

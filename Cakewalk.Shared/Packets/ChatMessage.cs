@@ -18,7 +18,7 @@ namespace Cakewalk.Shared.Packets
         {
             m_header = new PacketHeader()
             {
-                OpCode = PacketCode.WhoisResponse,
+                OpCode = PacketCode.ChatMessage,
                 SizeInBytes = (short)(Marshal.SizeOf(this) - 256)
             };
         }

@@ -1,12 +1,13 @@
 ﻿using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Linq;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Cakewalk.Shared;
 using Cakewalk.Shared.Packets;
-using System.Collections.Generic;
 
 namespace Cakewalk
 {
@@ -42,6 +43,11 @@ namespace Cakewalk
         public bool IsConnected
         {
             get { return m_socket.Connected; }
+        }
+
+        public int NetworkTime
+        {
+            get { return Environment.TickCount + m_clockOffset; }
         }
 
         /// <summary>
@@ -150,6 +156,26 @@ namespace Cakewalk
         /// </summary>
         private CancellationTokenSource m_ioStopToken;
 
+        /// <summary>
+        /// Are we waiting to get a clock sync response back?
+        /// </summary>
+        private bool m_awaitingClockSyncResponse = false;
+
+        /// <summary>
+        /// The time that the last clock sync request was sent
+        /// </summary>
+        private int m_clockSyncSendTime = 0;
+
+        /// <summary>
+        /// A list of the delta history
+        /// </summary>
+        private Queue<int> m_roundTripTimes = new Queue<int>();
+
+        /// <summary>
+        /// The offset to apply to the local clock to get the remote time
+        /// </summary>
+        private int m_clockOffset = 0;
+
         #region TEMPORARY COUNTERS! Clean this!
         public static int IN = 0;
         public static int OUT = 0;
@@ -249,6 +275,10 @@ namespace Cakewalk
 
                     BOUT += packetSize;
                     OUT++;
+                }
+                catch (SocketException)
+                {
+                    //Client disconnect
                 }
                 catch (Exception ex)
                 {
@@ -518,6 +548,26 @@ namespace Cakewalk
                     }
                 }
             }
+
+            //Synchronise clocks
+            else if (packet is ClockSyncResponse)
+            {
+                ClockSyncResponse response = (ClockSyncResponse)packet;
+                int rtt = Environment.TickCount - m_clockSyncSendTime;
+                m_roundTripTimes.Enqueue(rtt);
+                if (m_roundTripTimes.Count > 10)
+                {
+                    m_roundTripTimes.Dequeue();
+                }
+                SyncClock(response.Time);
+                m_awaitingClockSyncResponse = false;
+            }
+            else if (packet is ClockSyncRequest)
+            {
+                ClockSyncResponse response = PacketFactory.CreatePacket<ClockSyncResponse>();
+                response.Time = Environment.TickCount;
+                SendPacket(response);
+            }
         }
 
         /// <summary>
@@ -531,6 +581,43 @@ namespace Cakewalk
                 AuthState = EntityAuthState.Authorising;
                 DeferredSendPacket(PacketFactory.CreatePacket<AuthRequest>());
             }
+        }
+
+        /// <summary>
+        /// Send a clock sync request, if there is not already one pending.
+        /// </summary>
+        public void SendClockSync()
+        {
+            if (!m_awaitingClockSyncResponse)
+            {
+                m_clockSyncSendTime = Environment.TickCount;
+                m_awaitingClockSyncResponse = true;
+                SendPacket(PacketFactory.CreatePacket<ClockSyncRequest>());
+            }
+        }
+
+        /// <summary>
+        /// Synchronises the network clock using any round trip time data available.
+        /// </summary>
+        private void SyncClock(int remoteTime)
+        {
+            //Calculate the offset between the remote and local time
+            m_clockOffset = remoteTime - Environment.TickCount;
+
+            //Calculate the average of any round-trip times we have
+            int averageRTT = m_roundTripTimes.Sum() / m_roundTripTimes.Count;
+
+            //Calculate the standard deviation of the RTTs
+            int stddev = (int)Math.Sqrt(m_roundTripTimes.Select(n => (n - averageRTT)*(n - averageRTT)).Sum() / m_roundTripTimes.Count);
+
+            //Calculate the median RTT
+            int median = m_roundTripTimes.OrderBy(i => i).ElementAt(m_roundTripTimes.Count / 2);
+
+            //Remove any RTTs that are > 1 standard deviation away from the median and calculate the average again
+            int unskewedAverage = m_roundTripTimes.Where(i => Math.Abs(i - median) < stddev).Sum() / m_roundTripTimes.Count;
+
+            //Apply half of this average to the clock offset to account for latency
+            m_clockOffset += unskewedAverage / 2;
         }
     }
 }

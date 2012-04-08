@@ -8,6 +8,7 @@ using Cakewalk.Shared;
 using Cakewalk.Shared.Packets;
 using Cakewalk.Server.Zones;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 
 namespace Cakewalk
 {
@@ -16,6 +17,15 @@ namespace Cakewalk
     /// </summary>
     public class World
     {
+        const int MAX_CCU = 10000;
+        SocketAsyncPool m_asyncPool = new SocketAsyncPool(2048, MAX_CCU * 2);
+
+        public int LastUpdateDelta
+        {
+            get;
+            private set;
+        }
+
         /// <summary>
         /// How fast the world will try to update
         /// </summary>
@@ -101,7 +111,7 @@ namespace Cakewalk
                 if (!m_entities.ContainsKey(worldID))
                 {
                     //Add them in
-                    ServerEntity entity = new ServerEntity(socket, worldID, this);
+                    ServerEntity entity = new ServerEntity(socket, worldID, this, m_asyncPool);
                     if (m_entities.TryAdd(worldID, entity))
                     {
                         //DONE!
@@ -126,7 +136,7 @@ namespace Cakewalk
 
             //Start world update thread
             m_worldUpdateThread = new Thread(WorldUpdate);
-            m_worldUpdateThread.Priority = ThreadPriority.AboveNormal;
+            //m_worldUpdateThread.Priority = ThreadPriority.AboveNormal;
             m_worldUpdateThread.Start();
         }
 
@@ -154,7 +164,7 @@ namespace Cakewalk
                 //Calculate update delta
                 TimeSpan dt = TimeSpan.FromTicks(Environment.TickCount - m_lastWorldUpdateTime);
 
-                int updateStartTime = Environment.TickCount;
+                DateTime updateStartTime = DateTime.Now;
 
                 //Time for some expensive O(n) badness...
                 foreach (ServerEntity entity in m_entities.Values)
@@ -184,17 +194,14 @@ namespace Cakewalk
                 }
 
                 //Track update times
-                m_lastWorldUpdateTime = updateStartTime;
+                m_lastWorldUpdateTime = Environment.TickCount;
 
                 //Calculate how long to sleep for, based on how long the world update took
-                int sleepTime = WORLD_UPDATE_TARGET_MS - (int)TimeSpan.FromTicks(Environment.TickCount - updateStartTime).TotalMilliseconds;
 
-                if (sleepTime < 0)
-                {
-                    Console.WriteLine("World update in overtime: " + Math.Abs(sleepTime));
-                }
+                LastUpdateDelta = (int)(DateTime.Now - updateStartTime).TotalMilliseconds;
+                int sleepTime = WORLD_UPDATE_TARGET_MS - LastUpdateDelta;
 
-                Thread.Sleep(Math.Max(1, sleepTime));
+                Thread.Sleep(Math.Max(0, sleepTime));
             }
         }
 

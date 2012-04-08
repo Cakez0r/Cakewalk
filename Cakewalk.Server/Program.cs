@@ -21,7 +21,7 @@ namespace Cakewalk.App
                 if (delta >= interval)
                 {
                     //Update every second or so
-                    Console.Title = "IN: [" + NetEntity.IN + " Req/s | " + (NetEntity.BIN / 1024) + " KB/s]  OUT: [" + NetEntity.OUT + " Req/s | " + (NetEntity.BOUT / 1024) + " KB/s]  CCU: [" + world.CCU + "]";
+                    Console.Title = "IN: [" + NetEntity.IN + " Req/s | " + (NetEntity.BIN / 1024) + " KB/s]  OUT: [" + NetEntity.OUT + " Req/s | " + (NetEntity.BOUT / 1024) + " KB/s]  CCU: [" + world.CCU + "]  World Update Time: [" + world.LastUpdateDelta + "]";
                     NetEntity.IN = 0;
                     NetEntity.OUT = 0;
                     NetEntity.BOUT = 0;
@@ -29,7 +29,7 @@ namespace Cakewalk.App
                     lastCheck = DateTime.Now + (delta - interval);
                 }
 
-                Thread.Sleep(25);
+                Thread.Sleep(100);
             }
         }
     }

@@ -26,7 +26,7 @@ namespace Cakewalk
         /// <summary>
         /// Send and receive buffer size
         /// </summary>
-        private const int BUFFER_SIZE = 1460;
+        private const int BUFFER_SIZE = 2048;
 
         /// <summary>
         /// This entity's current authorisation state
@@ -45,6 +45,9 @@ namespace Cakewalk
             get { return m_socket.Connected; }
         }
 
+        /// <summary>
+        /// The current network time
+        /// </summary>
         public int NetworkTime
         {
             get { return Environment.TickCount + m_clockOffset; }
@@ -87,6 +90,21 @@ namespace Cakewalk
         private CoalescedData m_currentDeferredPacket = PacketFactory.CreatePacket<CoalescedData>();
 
         /// <summary>
+        /// Async send context object
+        /// </summary>
+        protected SocketAsyncEventArgs m_sendArgs;
+
+        /// <summary>
+        /// Async receive context object
+        /// </summary>
+        protected SocketAsyncEventArgs m_receiveArgs;
+
+        /// <summary>
+        /// Pointer to the send buffer, used to serialize packets directly to the buffer
+        /// </summary>
+        private IntPtr m_sendBufferPtr;
+
+        /// <summary>
         /// Incoming IO queue
         /// </summary>
         private ConcurrentQueue<IPacketBase> m_incomingQueue = new ConcurrentQueue<IPacketBase>();
@@ -95,16 +113,6 @@ namespace Cakewalk
         /// Outgoing IO queue
         /// </summary>
         private ConcurrentQueue<IPacketBase> m_outgoingQueue = new ConcurrentQueue<IPacketBase>();
-
-        /// <summary>
-        /// Receive buffer for the socket
-        /// </summary>
-        private byte[] m_receiveBuffer = new byte[BUFFER_SIZE];
-
-        /// <summary>
-        /// Receive buffer for the socket
-        /// </summary>
-        private byte[] m_sendBuffer = new byte[BUFFER_SIZE];
 
         /// <summary>
         /// Working buffer for constructing packets from the tcp stream
@@ -122,34 +130,9 @@ namespace Cakewalk
         private int m_workingPacketReceivedBytes = 0;
 
         /// <summary>
-        /// GC handle for pinning the receive buffer
-        /// </summary>
-        private GCHandle m_receiveBufferHandle;
-
-        /// <summary>
-        /// GC handle for pinning the send buffer
-        /// </summary>
-        private GCHandle m_sendBufferHandle;
-
-        /// <summary>
         /// GC handle for pinning the working buffer
         /// </summary>
         private GCHandle m_workingPacketBufferHandle;
-
-        /// <summary>
-        /// Context object for async receives
-        /// </summary>
-        private SocketAsyncEventArgs m_receiveAsyncArgs;
-
-        /// <summary>
-        /// Task for running network sends
-        /// </summary>
-        private Task m_sendTask;
-
-        /// <summary>
-        /// Task for running network receives.
-        /// </summary>
-        private Task m_receiveTask;
 
         /// <summary>
         /// Cancellation token for net IO
@@ -172,6 +155,11 @@ namespace Cakewalk
         private Queue<int> m_roundTripTimes = new Queue<int>();
 
         /// <summary>
+        /// Flag to indicate whether a send is currently in progress.
+        /// </summary>
+        private long sending = 0;
+
+        /// <summary>
         /// The offset to apply to the local clock to get the remote time
         /// </summary>
         private int m_clockOffset = 0;
@@ -184,18 +172,27 @@ namespace Cakewalk
         #endregion
 
         /// <summary>
-        /// Create a new entity from a socket
+        /// Create a new entity from a socket and immediately assign it a world id.
+        /// Requires async socket context objects with buffers pre-assigned
         /// </summary>
-        public NetEntity(Socket socket) : this(socket, -1)
-        {
-        }
-
-        /// <summary>
-        /// Create a new entity from a socket and immediately assign it a world id
-        /// </summary>
-        public NetEntity(Socket socket, int worldID)
+        public NetEntity(Socket socket, int worldID, SocketAsyncEventArgs sendEventArgs, SocketAsyncEventArgs receiveEventArgs)
         {
             WorldID = worldID;
+
+            m_sendArgs = sendEventArgs;
+            m_sendArgs.Completed += SendCompleted;
+            m_receiveArgs = receiveEventArgs;
+            m_receiveArgs.Completed += ReceiveCompleted;
+
+            unsafe
+            {
+                //Get the pointer for the send buffer
+                byte[] buffer = m_sendArgs.Buffer;
+                fixed (byte* bufPtr = buffer)
+                {
+                    m_sendBufferPtr = (IntPtr)(bufPtr + m_sendArgs.Offset);
+                }
+            }
 
             //Setup socket
             m_socket = socket;
@@ -206,14 +203,12 @@ namespace Cakewalk
             AuthState = EntityAuthState.Unauthorised;
 
             //Pin buffers so that we can block copy structs to / from them
-            m_sendBufferHandle = GCHandle.Alloc(m_sendBuffer, GCHandleType.Pinned);
-            m_receiveBufferHandle = GCHandle.Alloc(m_receiveBuffer, GCHandleType.Pinned);
             m_workingPacketBufferHandle = GCHandle.Alloc(m_workingPacketBuffer, GCHandleType.Pinned);
 
             m_ioStopToken = new CancellationTokenSource();
 
             //Kick off net IO tasks
-            QueueSend();
+            //QueueSend();
             QueueReceive();
         }
 
@@ -222,9 +217,13 @@ namespace Cakewalk
         /// </summary>
         private void QueueSend()
         {
-            m_sendTask = new Task(Send, m_ioStopToken.Token, TaskCreationOptions.LongRunning);
-            m_sendTask.ContinueWith((t) => t.Dispose());
-            m_sendTask.Start();
+            //Update sending flag
+            Interlocked.Exchange(ref sending, 1);
+
+            //Start sending on the task pool
+            Task sendTask = new Task(Send);
+            sendTask.ContinueWith((t) => t.Dispose());
+            sendTask.Start();
         }
 
         /// <summary>
@@ -232,61 +231,90 @@ namespace Cakewalk
         /// </summary>
         private void QueueReceive()
         {
-            m_receiveAsyncArgs = new SocketAsyncEventArgs();
-            m_receiveAsyncArgs.SetBuffer(m_receiveBuffer, 0, BUFFER_SIZE);
-            m_receiveAsyncArgs.Completed += new EventHandler<SocketAsyncEventArgs>(ReceiveCompleted);
-
-            m_receiveTask = new Task(Receive, m_ioStopToken.Token, TaskCreationOptions.LongRunning);
-            m_receiveTask.ContinueWith((t) => t.Dispose());
-            m_receiveTask.Start();
+            //Start receiving on the task pool
+            Task receiveTask = new Task(Receive);
+            receiveTask.ContinueWith((t) => t.Dispose());
+            receiveTask.Start();
         }
-        
+
         /// <summary>
         /// Poll the outgoing queue and send any packets
         /// </summary>
         private void Send()
         {
-            while (true)
+            IPacketBase packet = null;
+
+            //Grab a packet to send
+            while (!m_outgoingQueue.TryDequeue(out packet))
             {
-                IPacketBase packet = null;
-
-                while (!m_outgoingQueue.TryDequeue(out packet))
-                {
-                    //Spin until we get something to send
-                    Thread.Sleep(5);
-                }
-
-                //Bail out if we lost connection
-                if (!m_socket.Connected)
-                {
-                    return;
-                }
-
-                //Get size (in bytes) of the packet
-                int packetSize = packet.Header.SizeInBytes;
-
-                //Fill the send buffer with the packet bytes
-                SerializePacket(packet);
-
-                try
-                {
-                    //Send packet bytes over the wire
-                    m_socket.Send(m_sendBuffer, packetSize, SocketFlags.None);
-
-                    BOUT += packetSize;
-                    OUT++;
-                }
-                catch (SocketException)
-                {
-                    //Client disconnect
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine("Send error! " + ex);
-                }
-
-                //Yield
                 Thread.Sleep(0);
+            }
+
+            //Bail out if we lost connection
+            if (!m_socket.Connected)
+            {
+                return;
+            }
+
+            //Serialize the packet into the send buffer
+            SerializePacket(packet);
+
+            try
+            {
+                //Send packet bytes over the wire
+                m_sendArgs.SetBuffer(m_sendArgs.Offset, packet.Header.SizeInBytes);
+                if (!m_socket.SendAsync(m_sendArgs))
+                {
+                    SendCompleted(m_socket, m_sendArgs);
+                }
+            }
+            catch (SocketException)
+            {
+                //Client disconnect
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Send error! " + ex);
+            }
+        }
+
+        /// <summary>
+        /// Serialize the given packet into the send buffer.
+        /// </summary>
+        private void SerializePacket(IPacketBase packet)
+        {
+            try
+            {
+                Marshal.StructureToPtr(packet, m_sendBufferPtr, false);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Serialization error! " + ex);
+            }
+        }
+
+        /// <summary>
+        /// Event handler for async send completion
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="e"></param>
+        void SendCompleted(object sender, SocketAsyncEventArgs e)
+        {
+            if (e.SocketError == SocketError.Success)
+            {
+                BOUT += e.BytesTransferred;
+                OUT++;
+                
+                //Send again if there are more packets in the queue
+                if (m_outgoingQueue.Count > 0)
+                {
+                    QueueSend();
+                }
+                else
+                {
+                    //Unset the sending flag if there is nothing more to send
+                    Interlocked.Exchange(ref sending, 0);
+                }
             }
         }
 
@@ -300,9 +328,9 @@ namespace Cakewalk
                 if (m_socket.Connected)
                 {
                     //Receive data from the wire
-                    if (!m_socket.ReceiveAsync(m_receiveAsyncArgs))
+                    if (!m_socket.ReceiveAsync(m_receiveArgs))
                     {
-                        ReceiveCompleted(m_socket, m_receiveAsyncArgs);
+                        ReceiveCompleted(m_socket, m_receiveArgs);
                     }
                 }
                 else
@@ -323,72 +351,75 @@ namespace Cakewalk
         }
 
         /// <summary>
-        /// Event handler for an async receive completion
+        /// Handle a received packet
         /// </summary>
         private void ReceiveCompleted(object sender, SocketAsyncEventArgs e)
         {
             if (e.SocketError == SocketError.Success)
             {
                 BIN += e.BytesTransferred;
-                HandleReceive(e.BytesTransferred);
-                Receive();
-            }
-        }
 
-        /// <summary>
-        /// Handle a received packet
-        /// </summary>
-        private void HandleReceive(int bytesReceived)
-        {
-            if (bytesReceived > 1)
-            {
-                int bytesConsumed = 0;
-                //While there are bytes to be consumed in the receive buffer...
-                while (bytesConsumed < bytesReceived)
+                if (e.BytesTransferred > 0)
                 {
-                    //Work out how many bytes (if any) we need to complete the packet in the working buffer
-                    int bytesNeededForPacketCompletion = m_workingPacketSize - m_workingPacketReceivedBytes;
+                    int bytesConsumed = 0;
 
-                    //If we're awaiting a new packet...
-                    if (bytesNeededForPacketCompletion == 0)
+                    //While there are bytes to be consumed in the receive buffer...
+                    while (bytesConsumed < e.BytesTransferred)
                     {
-                        //Get the size we're expecting from the receive buffer
-                        m_workingPacketSize = BitConverter.ToInt16(m_receiveBuffer, bytesConsumed);
+                        //Work out how many bytes (if any) we need to complete the packet in the working buffer
+                        int bytesNeededForPacketCompletion = m_workingPacketSize - m_workingPacketReceivedBytes;
 
-                        //Update the number of bytes we need to construct the whole packet
-                        bytesNeededForPacketCompletion = m_workingPacketSize;
+                        //If we're awaiting a new packet...
+                        if (bytesNeededForPacketCompletion == 0)
+                        {
+                            if (e.BytesTransferred - bytesConsumed < 2)
+                            {
+                                //Haven't seen this happen since the refactor...
+                                Console.WriteLine("PROBLEM!");
+                            }
+
+                            //Get the size we're expecting from the receive buffer
+                            m_workingPacketSize = BitConverter.ToInt16(e.Buffer, e.Offset + bytesConsumed);
+
+                            //Update the number of bytes we need to construct the whole packet
+                            bytesNeededForPacketCompletion = m_workingPacketSize;
+                        }
+
+                        //Copy as much of the current working packet from the receive buffer as possible
+                        int bytesToCopy = Math.Min(bytesNeededForPacketCompletion, e.BytesTransferred - bytesConsumed);
+                        Buffer.BlockCopy(e.Buffer, e.Offset + bytesConsumed, m_workingPacketBuffer, m_workingPacketReceivedBytes, bytesToCopy);
+
+                        //If we have enough data to complete the packet, we should deserialize it from the working buffer
+                        if (e.BytesTransferred - bytesConsumed >= bytesNeededForPacketCompletion)
+                        {
+                            //Deserialize from the working buffer
+                            DeserializePacket(m_workingPacketBufferHandle.AddrOfPinnedObject());
+
+                            //Expect a new packet from the stream
+                            m_workingPacketReceivedBytes = 0;
+                            m_workingPacketSize = 0;
+
+                            IN++;
+                        }
+                        else
+                        {
+                            //If we didn't receive enough bytes to complete the packet, update the counters so that we can continue constructing it next receive
+                            m_workingPacketReceivedBytes += bytesToCopy;
+                        }
+
+                        //Count how many bytes we've used from the buffer (there may be multiple packets per receive)
+                        bytesConsumed += bytesToCopy;
                     }
 
-                    //Copy as much of the current working packet from the receive buffer as possible
-                    int bytesToCopy = Math.Min(bytesNeededForPacketCompletion, bytesReceived - bytesConsumed);
-                    Buffer.BlockCopy(m_receiveBuffer, bytesConsumed, m_workingPacketBuffer, m_workingPacketReceivedBytes, bytesToCopy);
 
-                    //If we have enough data to complete the packet, we should deserialize it from the working buffer
-                    if (bytesReceived - bytesConsumed >= bytesNeededForPacketCompletion)
-                    {
-                        //Deserialize from the working buffer
-                        DeserializePacket(m_workingPacketBufferHandle.AddrOfPinnedObject());
-
-                        //Expect a new packet from the stream
-                        m_workingPacketReceivedBytes = 0;
-                        m_workingPacketSize = 0;
-
-                        IN++;
-                    }
-                    else
-                    {
-                        //If we didn't receive enough bytes to complete the packet, update the counters so that we can continue constructing it next receive
-                        m_workingPacketReceivedBytes += bytesToCopy;
-                    }
-
-                    //Count how many bytes we've used from the buffer (there may be multiple packets per receive)
-                    bytesConsumed += bytesToCopy;
+                    //m_receivePool.ReturnArgs(e);
+                    QueueReceive();
                 }
-            }
-            else
-            {
-                //We were sent junk. Disconnect...
-                m_socket.Disconnect(false);
+                else
+                {
+                    //We were sent junk. Disconnect...
+                    m_socket.Disconnect(false);
+                }
             }
         }
 
@@ -447,20 +478,11 @@ namespace Cakewalk
         public void SendPacket(IPacketBase packet)
         {
             m_outgoingQueue.Enqueue(packet);
-        }
 
-        /// <summary>
-        /// Serialize the given packet into the send buffer.
-        /// </summary>
-        private void SerializePacket(IPacketBase packet)
-        {
-            try
+            //If we're not already sending, queue up a send on the task pool
+            if (Interlocked.Read(ref sending) == 0)
             {
-                Marshal.StructureToPtr(packet, m_sendBufferHandle.AddrOfPinnedObject(), false);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine("Serialization error! " + ex);
+                QueueSend();
             }
         }
 
@@ -469,21 +491,17 @@ namespace Cakewalk
         /// </summary>
         public void Update(TimeSpan dt)
         {
-            //Take a snapshot of how many packets are in the queue
-            int dequeueCount = m_incomingQueue.Count;
-
-            for (int i = 0; i < dequeueCount; i++)
+            //Handle all packets in the incoming queue
+            IPacketBase packet = null;
+            while (m_incomingQueue.TryDequeue(out packet))
             {
-                //Try handling all packets that were in the queue at the start of this upda
-                IPacketBase packet = null;
-                m_incomingQueue.TryDequeue(out packet);
                 HandlePacket(packet);
             }
 
             //Send any packets that have been deferred
-            foreach (CoalescedData packet in m_deferredSendList)
+            foreach (CoalescedData p in m_deferredSendList)
             {
-                SendPacket(packet);
+                SendPacket(p);
             }
             m_deferredSendList.Clear();
 
@@ -492,7 +510,18 @@ namespace Cakewalk
                 SendPacket(m_currentDeferredPacket);
             }
 
+            //Reset the current deferred packet for next update
             m_currentDeferredPacket = PacketFactory.CreatePacket<CoalescedData>();
+
+            //Warn if any of the queues are getting swamped
+            if (m_outgoingQueue.Count > 25)
+            {
+                Console.WriteLine("Outgoing queue swamped: " + m_outgoingQueue.Count);
+            }
+            if (m_incomingQueue.Count > 25)
+            {
+                Console.WriteLine("Incoming queue swamped: " + m_incomingQueue.Count);
+            }
         }
 
         /// <summary>
@@ -505,8 +534,7 @@ namespace Cakewalk
             m_socket.Close();
             m_socket.Dispose();
 
-            m_sendBufferHandle.Free();
-            m_receiveBufferHandle.Free();
+            m_workingPacketBufferHandle.Free();
         }
 
         /// <summary>

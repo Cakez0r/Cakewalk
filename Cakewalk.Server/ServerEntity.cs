@@ -11,6 +11,8 @@ namespace Cakewalk.Server
     /// </summary>
     public class ServerEntity : NetEntity
     {
+        SocketAsyncPool m_asyncPool;
+
         /// <summary>
         /// The last state received from this entity
         /// </summary>
@@ -33,11 +35,21 @@ namespace Cakewalk.Server
         /// Reference to the world
         /// </summary>
         private World m_world;
-        
-        public ServerEntity(Socket socket, int worldID, World world) : base(socket, worldID)
+
+        public ServerEntity(Socket socket, int worldID, World world, SocketAsyncPool asyncPool)
+            : base(socket, worldID, asyncPool.GetArgs(), asyncPool.GetArgs())
         {
+            m_asyncPool = asyncPool;
             Name = worldID.ToString();
             m_world = world;
+        }
+
+        public override void Dispose()
+        {
+            base.Dispose();
+
+            m_asyncPool.ReturnArgs(m_receiveArgs);
+            m_asyncPool.ReturnArgs(m_sendArgs);
         }
 
         /// <summary>

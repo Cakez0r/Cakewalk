@@ -1,3 +1,5 @@
+### NOTE: This project isn't in development any more and isn't a particularly good implementation! Check out my latest implementation at https://www.youtube.com/watch?v=nm2oefno9cE. Feel free to get in touch. I'm always interested to here from other game developers!
+
 # Cakewalk
 
 An MMO server I'm working on just for kicks. Not really intended to be a reuseable library, but the networking core should lift out pretty easily.
